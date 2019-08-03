@@ -477,41 +477,6 @@ def get_upper(_item: Item, polish: float) -> List[Item]:
     return res
 
 
-# 按照藏品->品质->物品(weapon+skin)->磨损 的方式建立字典索引
-database = {}
-for i in csgo_item:
-    # 建立对暗金的索引
-    if i.stat_trak not in database:
-        database[i.stat_trak] = {}
-    # 建立对藏品的索引
-    if i.collection not in database[i.stat_trak]:
-        database[i.stat_trak][i.collection] = {}
-    # 建立对品质的索引
-    if i.quality_level not in database[i.stat_trak][i.collection]:
-        database[i.stat_trak][i.collection][i.quality_level] = {}
-    # 建立对物品的索引
-    if i.weapon + i.skin not in database[i.stat_trak][i.collection][i.quality_level]:
-        database[i.stat_trak][i.collection][i.quality_level][i.weapon + i.skin] = {}
-    # 建立对磨损的索引
-    if i.polish_level not in database[i.stat_trak][i.collection][i.quality_level][i.weapon + i.skin]:
-        database[i.stat_trak][i.collection][i.quality_level][i.weapon + i.skin][i.polish_level] = i
-
-# 随缘炼金大乱炖法
-not_best_collection_list = [i for i in csgo_item if i.best_collection is False]  # 过滤掉顶级物品的名单
-# 按照品质分类好的物品（非暗金）
-quality_classify = {1: [i for i in not_best_collection_list if i.quality_level == 1 and not i.stat_trak],
-                    2: [i for i in not_best_collection_list if i.quality_level == 2 and not i.stat_trak],
-                    3: [i for i in not_best_collection_list if i.quality_level == 3 and not i.stat_trak],
-                    4: [i for i in not_best_collection_list if i.quality_level == 4 and not i.stat_trak],
-                    5: [i for i in not_best_collection_list if i.quality_level == 5 and not i.stat_trak]}
-# 按照品质分类好的物品（暗金）
-quality_classify_trak = {1: [i for i in not_best_collection_list if i.quality_level == 1 and i.stat_trak],
-                         2: [i for i in not_best_collection_list if i.quality_level == 2 and i.stat_trak],
-                         3: [i for i in not_best_collection_list if i.quality_level == 3 and i.stat_trak],
-                         4: [i for i in not_best_collection_list if i.quality_level == 4 and i.stat_trak],
-                         5: [i for i in not_best_collection_list if i.quality_level == 5 and i.stat_trak]}
-
-
 # 返回实际收益
 def real_receive(buy_list, upper):
     # 计算炼金收益
@@ -570,7 +535,7 @@ def cal_method(buy_list, percent) -> float:
 
 
 def print_method(buy_list, money, percent):
-    if money > 1 and cal_value(buy_list) < 1000:
+    #if money > 1 and cal_value(buy_list) < 1000:
         avg_polish = 0  # 计算平均磨损
         for _i in buy_list:
             avg_polish += cal_polish(_i, percent, _i.polish_level)
@@ -616,60 +581,152 @@ def print_method(buy_list, money, percent):
         print('===============================================')
 
 
-def worker():
-    while True:
-        percent = 75  # 磨损度取区间80%，便于购买
-        _quality = random.randint(1, 5)  # 决定抽出的品质
-        stat = random.randint(0, 1)  # 决定抽暗金
-        # 随机决定要不要抽暗金
-        if stat:
-            can_buy_list = quality_classify_trak[_quality]
+# 指定暴力枚举炼金法
+def worker(item1, item2, lock, res, process_count):
+    percent = 80    # 磨损区间
+    high_money = -100000000
+    high_method = []
+    for _i in range(11):
+        temp_method = mix_item(item1, item2, _i)
+        temp_money = cal_method(temp_method, percent)
+        if temp_money >= high_money:
+            high_money = temp_money
+            high_method = temp_method
+    # 如果收益>0则储存最终结果
+    lock.acquire()
+    if high_money > -100000000:
+        res.append((high_method, high_money))
+    process_count.value += 1
+    lock.release()
+
+
+# 按照藏品->品质->物品(weapon+skin)->磨损 的方式建立字典索引
+database = {}
+for i in csgo_item:
+    # 建立对暗金的索引
+    if i.stat_trak not in database:
+        database[i.stat_trak] = {}
+    # 建立对藏品的索引
+    if i.collection not in database[i.stat_trak]:
+        database[i.stat_trak][i.collection] = {}
+    # 建立对品质的索引
+    if i.quality_level not in database[i.stat_trak][i.collection]:
+        database[i.stat_trak][i.collection][i.quality_level] = {}
+    # 建立对物品的索引
+    if i.weapon + i.skin not in database[i.stat_trak][i.collection][i.quality_level]:
+        database[i.stat_trak][i.collection][i.quality_level][i.weapon + i.skin] = {}
+    # 建立对磨损的索引
+    if i.polish_level not in database[i.stat_trak][i.collection][i.quality_level][i.weapon + i.skin]:
+        database[i.stat_trak][i.collection][i.quality_level][i.weapon + i.skin][i.polish_level] = i
+
+# 找出可用于炼金的物品
+not_best_collection_list = [i for i in csgo_item if i.best_collection is False]  # 过滤掉顶级物品的名单
+not_best_collection_list = [i for i in not_best_collection_list if i.sell_num >= 10]    # 过滤掉在售小于10的
+# 按照品质分类好的物品（非暗金）
+quality_classify = {1: [i for i in not_best_collection_list if i.quality_level == 1 and not i.stat_trak],
+                    2: [i for i in not_best_collection_list if i.quality_level == 2 and not i.stat_trak],
+                    3: [i for i in not_best_collection_list if i.quality_level == 3 and not i.stat_trak],
+                    4: [i for i in not_best_collection_list if i.quality_level == 4 and not i.stat_trak],
+                    5: [i for i in not_best_collection_list if i.quality_level == 5 and not i.stat_trak]}
+# 按照品质分类好的物品（暗金）
+quality_classify_trak = {1: [i for i in not_best_collection_list if i.quality_level == 1 and i.stat_trak],
+                         2: [i for i in not_best_collection_list if i.quality_level == 2 and i.stat_trak],
+                         3: [i for i in not_best_collection_list if i.quality_level == 3 and i.stat_trak],
+                         4: [i for i in not_best_collection_list if i.quality_level == 4 and i.stat_trak],
+                         5: [i for i in not_best_collection_list if i.quality_level == 5 and i.stat_trak]}
+print('开始暴力枚举模式，正在枚举所有可能情况')
+enum = []
+# 物品枚举（1~5是代表品质）
+for i in range(1, 6):
+    print('正在枚举品质' + str(i))
+    for x in range(len(quality_classify[i]) - 1):  # x的范围从1~总数-1   （因为是下标所以自己会额外-1）
+        for y in range(x + 1, len(quality_classify[i])):   # y的范围从x+1~总数
+            enum.append((quality_classify[i][x], quality_classify[i][y]))
+    for x in range(len(quality_classify_trak[i]) - 1):  # x的范围从1~总数-1   （因为是下标所以自己会额外-1）
+        for y in range(x + 1, len(quality_classify_trak[i])):   # y的范围从x+1~总数
+            enum.append((quality_classify_trak[i][x], quality_classify_trak[i][y]))
+print('枚举完毕，共有' + str(len(enum)) + '个配方，正在计算统计')
+manager = multiprocessing.Manager()
+_lock = multiprocessing.Lock()
+_res = manager.list([])
+_process_count = manager.Value('i', 10)  # 共计可用10进程
+_index = 0
+while True:
+    _lock.acquire()
+    if _process_count.value > 0:
+        _process_count.value -= 1
+        if _index < len(enum):
+            multiprocessing.Process(target=worker, args=(enum[_index][0], enum[_index][1], _lock, _res, _process_count)).start()
+            _index += 1
         else:
-            can_buy_list = quality_classify[_quality]
-        # 从名单里随便抽
-        if len(can_buy_list) == 0:
-            # 低品质的枪没暗金，就跳过吧
-            continue
-            # print('quality'+str(quality))
-            # print('stat'+str(stat))
+            _lock.release()
+            break
+    _lock.release()
+    if _index % 100 == 0:
+        print('进度已达到' + str(_index))
+# 将结果排序
+_res = sorted(_res, key=lambda _x: _x[1])
+# 输出
+for i in _res:
+    print_method(i[0], i[1], 80)
 
-        weapon1 = can_buy_list[random.randint(0, len(can_buy_list) - 1)]  # 随机俩物品
-        weapon2 = can_buy_list[random.randint(0, len(can_buy_list) - 1)]
+time.sleep(5)
 
-        # 要是随机出的物品，在BUFF在售不够10个，就重新挑选
-        if weapon1.sell_num <= 5 or weapon2.sell_num <= 5:
-            continue
+# 超级大乱炖随机炼金法
+# def random_worker():
+#     while True:
+#         percent = 75  # 磨损度取区间80%，便于购买
+#         _quality = random.randint(1, 5)  # 决定抽出的品质
+#         stat = random.randint(0, 1)  # 决定抽暗金
+#         # 随机决定要不要抽暗金
+#         if stat:
+#             can_buy_list = quality_classify_trak[_quality]
+#         else:
+#             can_buy_list = quality_classify[_quality]
+#         # 从名单里随便抽
+#         if len(can_buy_list) == 0:
+#             # 低品质的枪没暗金，就跳过吧
+#             continue
+#             # print('quality'+str(quality))
+#             # print('stat'+str(stat))
+#
+#         weapon1 = can_buy_list[random.randint(0, len(can_buy_list) - 1)]  # 随机俩物品
+#         weapon2 = can_buy_list[random.randint(0, len(can_buy_list) - 1)]
+#
+#         # 要是随机出的物品，在BUFF在售不够10个，就重新挑选
+#         if weapon1.sell_num <= 5 or weapon2.sell_num <= 5:
+#             continue
+#
+#         # # 混合后塞进购买列表当中
+#         # buy_list = mix_item(weapon1, weapon2, 5)
+#         # # 计算收益
+#         # money = cal_method(buy_list, percent)
+#         # if money > 0:
+#
+#         # 收入大于0，说明有戏，应当改变配方比例，寻求最大利润
+#         high_money = -1
+#         high_method = []
+#         for _i in range(11):
+#             temp_method = mix_item(weapon1, weapon2, _i)
+#             temp_money = cal_method(temp_method, percent)
+#             if temp_money > high_money:
+#                 high_money = temp_money
+#                 high_method = temp_method
+#         # 打印出最终结果
+#         # print(money_list)
+#         print_method(high_method, high_money, percent)
 
-        # # 混合后塞进购买列表当中
-        # buy_list = mix_item(weapon1, weapon2, 5)
-        # # 计算收益
-        # money = cal_method(buy_list, percent)
-        # if money > 0:
 
-        # 收入大于0，说明有戏，应当改变配方比例，寻求最大利润
-        high_money = -1
-        high_method = []
-        for _i in range(11):
-            temp_method = mix_item(weapon1, weapon2, _i)
-            temp_money = cal_method(temp_method, percent)
-            if temp_money > high_money:
-                high_money = temp_money
-                high_method = temp_method
-        # 打印出最终结果
-        # print(money_list)
-        print_method(high_method, high_money, percent)
-
-
-print('开始随机大乱炖模式')
-# 创建3个进程同时刷
-p1 = multiprocessing.Process(target=worker)
-p2 = multiprocessing.Process(target=worker)
-p3 = multiprocessing.Process(target=worker)
-p1.start()
-time.sleep(1)
-#p2.start()
-time.sleep(1)
-#p3.start()
+# print('开始随机大乱炖模式')
+# # 创建3个进程同时刷
+# p1 = multiprocessing.Process(target=random_worker)
+# p2 = multiprocessing.Process(target=random_worker)
+# p3 = multiprocessing.Process(target=random_worker)
+# p1.start()
+# time.sleep(1)
+# p2.start()
+# time.sleep(1)
+# p3.start()
 
 
 # """
